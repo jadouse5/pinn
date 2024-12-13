@@ -265,30 +265,27 @@ def create_orbit_plot(positions, scenario, time_points):
             row=2, col=2
         )
     
-    # Update layout
+       # Update layout with correct syntax
     fig.update_layout(
         height=800,
         title_text=f"Three-Body System: {', '.join(scenario['bodies'])}",
         showlegend=True,
-       
-        
-        
+        hovermode='closest',
+        plot_bgcolor='rgb(230, 230, 230)',
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=0.01
+        ),
         updatemenus=[{
             'type': 'buttons',
             'showactive': False,
-             hovermode='closest',
-             plot_bgcolor='rgb(230, 230, 230)',
-             showlegend=True,
-             legend=dict(
-                yanchor="top",
-                y=0.99,
-                xanchor="left",
-                x=0.01
             'x': 0.1,
             'y': 1.1,
             'buttons': [
                 {
-                    'label': 'Play',
+                    'label': '▶️ Play',
                     'method': 'animate',
                     'args': [None, {
                         'frame': {'duration': 30, 'redraw': True},
@@ -298,7 +295,7 @@ def create_orbit_plot(positions, scenario, time_points):
                     }]
                 },
                 {
-                    'label': 'Pause',
+                    'label': '⏸️ Pause',
                     'method': 'animate',
                     'args': [[None], {
                         'frame': {'duration': 0, 'redraw': False},
@@ -307,7 +304,7 @@ def create_orbit_plot(positions, scenario, time_points):
                     }]
                 }
             ]
-        }]
+        }],
         sliders=[{
             'currentvalue': {'prefix': 'Time: ', 'suffix': ' s'},
             'steps': [
@@ -324,6 +321,10 @@ def create_orbit_plot(positions, scenario, time_points):
             ]
         }]
     )
+    
+    # Make grid visible
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='white', row=1, col=1)
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='white', row=1, col=1)
     
     # Update axes
     fig.update_xaxes(title_text="X Position (km)", row=1, col=1)
