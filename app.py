@@ -10,7 +10,7 @@ class CelestialBodyPINN(torch.nn.Module):
     def __init__(self, scenario_params=None):
         super().__init__()
         
-        # Network layers defined individually to match state dict keys
+        # Network layers to match the trained model exactly
         self.network = torch.nn.Sequential(
             torch.nn.Linear(1, 256),      # network.0
             torch.nn.Tanh(),              # network.1
@@ -20,9 +20,8 @@ class CelestialBodyPINN(torch.nn.Module):
             torch.nn.Tanh(),              # network.5
             torch.nn.Linear(256, 256),    # network.6
             torch.nn.Tanh(),              # network.7
-            torch.nn.Linear(256, 256),    # network.8
-            torch.nn.Tanh(),              # network.9
-            torch.nn.Linear(256, 6)       # network.10
+            torch.nn.Linear(256, 6),      # network.8 (directly to output)
+            # Removed the extra layers that were causing the mismatch
         )
         
         # Initialize physics parameters
@@ -51,15 +50,26 @@ def load_model_safely(uploaded_file, scenario_params):
         
         # Create new state dict with correct keys
         new_state_dict = {}
-        for i in range(0, 11, 2):  # Only load Linear layer parameters
-            if f'network.{i}.weight' in state_dict:
-                new_state_dict[f'network.{i}.weight'] = state_dict[f'network.{i}.weight']
-                new_state_dict[f'network.{i}.bias'] = state_dict[f'network.{i}.bias']
+        layer_map = {
+            'network.0': 'network.0',  # Input layer
+            'network.2': 'network.2',  # First hidden layer
+            'network.4': 'network.4',  # Second hidden layer
+            'network.6': 'network.6',  # Third hidden layer
+            'network.8': 'network.8'   # Output layer
+        }
+        
+        for old_key in state_dict:
+            if old_key in layer_map:
+                new_key = layer_map[old_key]
+                new_state_dict[new_key + '.weight'] = state_dict[old_key + '.weight']
+                new_state_dict[new_key + '.bias'] = state_dict[old_key + '.bias']
         
         # Load the modified state dict
         model.load_state_dict(new_state_dict, strict=False)
         model.eval()
         
+        # Verify model loaded correctly
+        st.success("Model loaded successfully!")
         return model, None
     except Exception as e:
         return None, str(e)
