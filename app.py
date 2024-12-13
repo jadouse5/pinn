@@ -8,21 +8,26 @@ import time
 from datetime import datetime
 import io
 
-
 class TraditionalSolver:
     def __init__(self, G=6.67430e-20, m1=1.0, m2=1.0, m3=1.0):
         self.G = G
         self.m1, self.m2, self.m3 = m1, m2, m3
     
     def derivatives(self, state, t):
-        x1, y1, x2, y2, x3, y3, vx1, vy1, vx2, vy2, vx3, vy3 = state
+        # First 6 values are positions, next 6 are velocities
+        positions = state[:6]
+        velocities = state[6:]
         
-        # Compute distances
-        r12 = np.sqrt((x1 - x2)**2 + (y1 - y2)**2)
-        r13 = np.sqrt((x1 - x3)**2 + (y1 - y3)**2)
-        r23 = np.sqrt((x2 - x3)**2 + (y2 - y3)**2)
+        x1, y1 = positions[0], positions[1]
+        x2, y2 = positions[2], positions[3]
+        x3, y3 = positions[4], positions[5]
         
-        # Compute accelerations
+        # Calculate distances
+        r12 = np.sqrt((x1 - x2)**2 + (y1 - y2)**2) + 1e-10  # Add small number to avoid division by zero
+        r13 = np.sqrt((x1 - x3)**2 + (y1 - y3)**2) + 1e-10
+        r23 = np.sqrt((x2 - x3)**2 + (y2 - y3)**2) + 1e-10
+        
+        # Calculate accelerations
         ax1 = self.G * (self.m2 * (x2 - x1) / r12**3 + self.m3 * (x3 - x1) / r13**3)
         ay1 = self.G * (self.m2 * (y2 - y1) / r12**3 + self.m3 * (y3 - y1) / r13**3)
         
@@ -32,7 +37,7 @@ class TraditionalSolver:
         ax3 = self.G * (self.m1 * (x1 - x3) / r13**3 + self.m2 * (x2 - x3) / r23**3)
         ay3 = self.G * (self.m1 * (y1 - y3) / r13**3 + self.m2 * (y2 - y3) / r23**3)
         
-        return [vx1, vy1, vx2, vy2, vx3, vy3, ax1, ay1, ax2, ay2, ax3, ay3]
+        return np.array([*velocities, ax1, ay1, ax2, ay2, ax3, ay3])
         
 
 class CelestialBodyPINN(torch.nn.Module):
@@ -343,159 +348,77 @@ def create_orbit_plot(positions, scenario, time_points):
     return fig
 
 def create_comparison_plot(positions_pinn, positions_trad, scenario, time_points):
-    """Create interactive comparison plot showing both methods"""
-    
-    fig = make_subplots(rows=2, cols=2,
-                       specs=[[{}, {}],
-                             [{"colspan": 2}, None]],
-                       subplot_titles=('PINN Method', 'Traditional Method',
-                                     'Deviation Between Methods'))
-    
-    # Colors for bodies
+    fig = make_subplots(
+        rows=2, cols=2,
+        specs=[[{"type": "scatter"}, {"type": "scatter"}],
+               [{"colspan": 2}, None]],
+        subplot_titles=('PINN Method', 'Traditional Method', 'Deviation Between Methods'),
+        vertical_spacing=0.15,
+        horizontal_spacing=0.1
+    )
+
+    # Colors and sizes
     colors = ['blue', 'gray', 'red']
     body_sizes = [20, 15, 15]
-    
-    # Create animation frames
-    frames = []
-    for i in range(len(time_points)):
-        frame_data = []
-        
-        # PINN trajectories (left plot)
-        for j in range(3):
-            # Past trajectory
-            frame_data.append(
-                go.Scatter(
-                    x=positions_pinn[:i+1, j*2],
-                    y=positions_pinn[:i+1, j*2+1],
-                    mode='lines',
-                    line=dict(color=colors[j], width=1),
-                    opacity=0.5,
-                    showlegend=False,
-                    xaxis='x1',
-                    yaxis='y1'
-                )
-            )
-            
-            # Current position
-            frame_data.append(
-                go.Scatter(
-                    x=[positions_pinn[i, j*2]],
-                    y=[positions_pinn[i, j*2+1]],
-                    mode='markers',
-                    marker=dict(
-                        size=body_sizes[j],
-                        color=colors[j],
-                        symbol='circle',
-                        line=dict(color='white', width=1)
-                    ),
-                    name=f'{scenario["bodies"][j]} (PINN)',
-                    xaxis='x1',
-                    yaxis='y1'
-                )
-            )
-        
-        # Traditional method trajectories (right plot)
-        if positions_trad is not None:
-            for j in range(3):
-                frame_data.append(
-                    go.Scatter(
-                        x=positions_trad[:i+1, j*2],
-                        y=positions_trad[:i+1, j*2+1],
-                        mode='lines',
-                        line=dict(color=colors[j], width=1, dash='dot'),
-                        opacity=0.5,
-                        showlegend=False,
-                        xaxis='x2',
-                        yaxis='y2'
-                    )
-                )
-                
-                frame_data.append(
-                    go.Scatter(
-                        x=[positions_trad[i, j*2]],
-                        y=[positions_trad[i, j*2+1]],
-                        mode='markers',
-                        marker=dict(
-                            size=body_sizes[j],
-                            color=colors[j],
-                            symbol='square',
-                            line=dict(color='white', width=1)
-                        ),
-                        name=f'{scenario["bodies"][j]} (Traditional)',
-                        xaxis='x2',
-                        yaxis='y2'
-                    )
-                )
-            
-            # Calculate deviation between methods
-            deviation = np.sqrt(np.sum((positions_pinn[:i+1] - positions_trad[:i+1])**2, axis=1))
-            frame_data.append(
-                go.Scatter(
-                    x=time_points[:i+1],
-                    y=deviation,
-                    mode='lines',
-                    name='Method Deviation',
-                    line=dict(color='red'),
-                    xaxis='x3',
-                    yaxis='y3'
-                )
-            )
-        
-        frames.append(go.Frame(data=frame_data, name=f'frame{i}'))
-    
+
+    # Add PINN trajectories (left plot)
+    for j in range(3):
+        fig.add_trace(
+            go.Scatter(
+                x=positions_pinn[:, j*2],
+                y=positions_pinn[:, j*2+1],
+                mode='lines+markers',
+                name=f'{scenario["bodies"][j]} (PINN)',
+                line=dict(color=colors[j], width=2),
+                marker=dict(size=body_sizes[j], symbol='circle')
+            ),
+            row=1, col=1
+        )
+
+    # Add traditional method trajectories (right plot)
+    for j in range(3):
+        fig.add_trace(
+            go.Scatter(
+                x=positions_trad[:, j*2],
+                y=positions_trad[:, j*2+1],
+                mode='lines+markers',
+                name=f'{scenario["bodies"][j]} (Traditional)',
+                line=dict(color=colors[j], width=2, dash='dot'),
+                marker=dict(size=body_sizes[j], symbol='square')
+            ),
+            row=1, col=2
+        )
+
+    # Calculate and plot deviation
+    deviation = np.sqrt(np.sum((positions_pinn - positions_trad)**2, axis=1))
+    fig.add_trace(
+        go.Scatter(
+            x=time_points,
+            y=deviation,
+            mode='lines',
+            name='Method Deviation',
+            line=dict(color='red', width=2)
+        ),
+        row=2, col=1
+    )
+
     # Update layout
     fig.update_layout(
         height=800,
         showlegend=True,
-        updatemenus=[{
-            'type': 'buttons',
-            'showactive': False,
-            'buttons': [
-                {
-                    'label': 'Play',
-                    'method': 'animate',
-                    'args': [None, {
-                        'frame': {'duration': 50, 'redraw': True},
-                        'fromcurrent': True,
-                        'transition': {'duration': 0}
-                    }]
-                },
-                {
-                    'label': 'Pause',
-                    'method': 'animate',
-                    'args': [[None], {
-                        'frame': {'duration': 0, 'redraw': False},
-                        'mode': 'immediate',
-                        'transition': {'duration': 0}
-                    }]
-                }
-            ]
-        }],
-        sliders=[{
-            'currentvalue': {'prefix': 'Time: ', 'suffix': ' s'},
-            'steps': [
-                {
-                    'args': [[f'frame{k}'], {
-                        'frame': {'duration': 0, 'redraw': True},
-                        'mode': 'immediate',
-                        'transition': {'duration': 0}
-                    }],
-                    'label': f'{time_points[k]:.1f}',
-                    'method': 'animate'
-                }
-                for k in range(0, len(time_points), max(1, len(time_points)//10))
-            ]
-        }]
+        hovermode='closest',
+        plot_bgcolor='rgb(240, 240, 240)',
+        title_text=f"PINN vs Traditional Method Comparison: {', '.join(scenario['bodies'])}",
     )
-    
+
     # Update axes
-    for i in range(1, 3):
-        fig.update_xaxes(title_text="X Position (km)", row=1, col=i)
-        fig.update_yaxes(title_text="Y Position (km)", row=1, col=i)
+    for i in range(2):
+        fig.update_xaxes(title_text="X Position (km)", row=1, col=i+1, showgrid=True, gridwidth=1, gridcolor='white')
+        fig.update_yaxes(title_text="Y Position (km)", row=1, col=i+1, showgrid=True, gridwidth=1, gridcolor='white')
     
     fig.update_xaxes(title_text="Time (s)", row=2, col=1)
     fig.update_yaxes(title_text="Deviation (km)", row=2, col=1)
-    
+
     return fig
                         
 def main():
@@ -598,6 +521,7 @@ def main():
             
             # Comparison settings
             show_comparison = st.sidebar.checkbox("Compare with Traditional Method")
+            
             if show_comparison:
                 st.sidebar.warning("Traditional method may show chaotic behavior over long periods")
             
@@ -621,11 +545,25 @@ def main():
                                 m2=scenario['masses'][1],
                                 m3=scenario['masses'][2]
                             )
-                            initial_state = np.concatenate([
-                                positions_pinn[0],  # Initial positions
-                                np.zeros(6)         # Initial velocities
-                            ])
-                            positions_trad = odeint(trad_solver.derivatives, initial_state, t_points)[:, :6]
+                            
+                            # Set up initial conditions with proper velocities
+                            initial_positions = positions_pinn[0]
+                            initial_velocities = np.zeros(6)  # Initialize velocities
+                            for i in range(3):
+                                if i > 0:  # Skip first body (usually central body)
+                                    v = scenario['velocities'][i]
+                                    initial_velocities[i*2] = 0  # vx
+                                    initial_velocities[i*2+1] = v  # vy
+                            
+                            initial_state = np.concatenate([initial_positions, initial_velocities])
+                            
+                            # Solve using odeint with smaller time steps for stability
+                            t_dense = np.linspace(0, t_end, n_points * 10)  # Use more points for integration
+                            trad_solution = odeint(trad_solver.derivatives, initial_state, t_dense)
+                            
+                            # Downsample the solution to match PINN points
+                            indices = np.linspace(0, len(t_dense)-1, n_points, dtype=int)
+                            positions_trad = trad_solution[indices, :6]  # Take only positions
                             
                             # Create comparison plot
                             fig = create_comparison_plot(positions_pinn, positions_trad, scenario, t_points)
