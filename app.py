@@ -494,7 +494,6 @@ if st.sidebar.button("Run Simulation"):
                     else:
                         st.metric("Time to Chaos", "Not reached")
                         
-
 def main():
     st.set_page_config(page_title="Celestial Body Simulator", layout="wide")
     
@@ -504,7 +503,7 @@ def main():
     Select a predefined scenario or create your own!
     """)
 
-    # Initialize session state if needed
+    # Initialize session state
     if 'model' not in st.session_state:
         st.session_state.model = None
     
@@ -568,44 +567,36 @@ def main():
         
         st.session_state.model = model
         
-        # Simulation parameters
-        st.sidebar.header("Simulation Parameters")
-        t_end = st.sidebar.number_input(
-            "Simulation Time (seconds)", 
-            value=float(scenario['time_scale']),
-            format="%.2e"
+        # Time controls
+        st.sidebar.header("Time Settings")
+        time_unit = st.sidebar.selectbox(
+            "Time Unit", 
+            ["Days", "Months", "Years"]
         )
-        n_points = st.sidebar.slider("Number of Points", 100, 2000, 1000)
-
-         # Time controls
-    st.sidebar.header("Time Settings")
-    time_unit = st.sidebar.selectbox(
-        "Time Unit", 
-        ["Days", "Months", "Years"]
-    )
-    
-    time_value = st.sidebar.number_input(
-        f"Number of {time_unit}", 
-        min_value=1, 
-        max_value=1000, 
-        value=1
-    )
-    
-    # Convert to seconds based on unit
-    time_multipliers = {
-        "Days": 24 * 3600,
-        "Months": 30 * 24 * 3600,
-        "Years": 365 * 24 * 3600
-    }
-    t_end = time_value * time_multipliers[time_unit]
-    
-    # Comparison settings
-    show_comparison = st.sidebar.checkbox("Compare with Traditional Method")
-    
-    if show_comparison:
-        st.sidebar.warning("Traditional method may show chaotic behavior over long periods")
         
-        # Run simulation
+        time_value = st.sidebar.number_input(
+            f"Number of {time_unit}", 
+            min_value=1, 
+            max_value=1000, 
+            value=1
+        )
+        
+        # Convert to seconds based on unit
+        time_multipliers = {
+            "Days": 24 * 3600,
+            "Months": 30 * 24 * 3600,
+            "Years": 365 * 24 * 3600
+        }
+        t_end = time_value * time_multipliers[time_unit]
+        
+        n_points = st.sidebar.slider("Number of Points", 100, 2000, 1000)
+        
+        # Comparison settings
+        show_comparison = st.sidebar.checkbox("Compare with Traditional Method")
+        if show_comparison:
+            st.sidebar.warning("Traditional method may show chaotic behavior over long periods")
+        
+        # Run simulation button
         if st.sidebar.button("Run Simulation"):
             with st.spinner("Running simulation..."):
                 try:
@@ -613,12 +604,31 @@ def main():
                     t_points = np.linspace(0, t_end, n_points)
                     t = torch.tensor(t_points, dtype=torch.float32).reshape(-1, 1)
                     
-                    # Get predictions
+                    # Get PINN predictions
                     with torch.no_grad():
-                        positions = model(t).numpy()
+                        positions_pinn = model(t).numpy()
                     
-                    # Create plots
-                    fig = create_orbit_plot(positions, scenario, t_points)
+                    if show_comparison:
+                        # Get traditional method predictions
+                        trad_solver = TraditionalSolver(
+                            G=scenario['G'],
+                            m1=scenario['masses'][0],
+                            m2=scenario['masses'][1],
+                            m3=scenario['masses'][2]
+                        )
+                        initial_state = np.concatenate([
+                            positions_pinn[0],  # Initial positions
+                            np.zeros(6)         # Initial velocities
+                        ])
+                        positions_trad = odeint(trad_solver.derivatives, initial_state, t_points)[:, :6]
+                        
+                        # Create comparison plot
+                        fig = create_comparison_plot(positions_pinn, positions_trad, scenario, t_points)
+                    else:
+                        # Create single plot
+                        fig = create_orbit_plot(positions_pinn, scenario, t_points)
+                    
+                    # Display plot
                     st.plotly_chart(fig, use_container_width=True)
                     
                     # Display system information
@@ -633,8 +643,24 @@ def main():
                             if i > 0:
                                 st.write(f"Velocity: {scenario['velocities'][i]:.2e} km/s")
                     
+                    # Add chaos analysis if comparison is enabled
+                    if show_comparison:
+                        deviation = np.sqrt(np.sum((positions_pinn - positions_trad)**2, axis=1))
+                        chaos_time = t_points[np.where(deviation > 1e3)[0][0]] if np.any(deviation > 1e3) else None
+                        
+                        st.write("### Chaos Analysis")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Maximum Deviation", f"{deviation.max():.2e} km")
+                        with col2:
+                            if chaos_time:
+                                st.metric("Time to Chaos", f"{chaos_time/3600/24:.1f} days")
+                            else:
+                                st.metric("Time to Chaos", "Not reached")
+                    
                 except Exception as e:
                     st.error(f"Error during simulation: {str(e)}")
+                    st.error("Full error:", exc_info=True)
     else:
         st.warning("Please upload a trained model to continue")
 
