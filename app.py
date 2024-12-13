@@ -6,6 +6,7 @@ from plotly.subplots import make_subplots
 import time
 from datetime import datetime
 import io
+
 class CelestialBodyPINN(torch.nn.Module):
     def __init__(self, scenario_params=None):
         super().__init__()
@@ -73,6 +74,7 @@ def load_model_safely(uploaded_file, scenario_params):
         return model, None
     except Exception as e:
         return None, str(e)
+        
 def create_orbit_plot(positions, scenario, time_points):
     """Create interactive orbital plot with rotating bodies"""
     
@@ -129,33 +131,64 @@ def create_orbit_plot(positions, scenario, time_points):
                       (positions[:i+1, 1] - positions[:i+1, 5])**2)
         r23 = np.sqrt((positions[:i+1, 2] - positions[:i+1, 4])**2 + 
                       (positions[:i+1, 3] - positions[:i+1, 5])**2)
-        
+                
+        # For distance plots
         frame_data.append(
-            go.Scatter(x=time_points[:i+1], y=r12, name=f'Distance {scenario["bodies"][0]}-{scenario["bodies"][1]}',
-                      line=dict(color='purple'), row=2, col=1)
+            go.Scatter(
+                x=time_points[:i+1], 
+                y=r12, 
+                name=f'Distance {scenario["bodies"][0]}-{scenario["bodies"][1]}',
+                line=dict(color='purple'),
+                xaxis='x2',  # Use xaxis2 for the second row
+                yaxis='y2'   # Use yaxis2 for the second row
+            )
         )
         frame_data.append(
-            go.Scatter(x=time_points[:i+1], y=r13, name=f'Distance {scenario["bodies"][0]}-{scenario["bodies"][2]}',
-                      line=dict(color='orange'), row=2, col=1)
+            go.Scatter(
+                x=time_points[:i+1], 
+                y=r13, 
+                name=f'Distance {scenario["bodies"][0]}-{scenario["bodies"][2]}',
+                line=dict(color='orange'),
+                xaxis='x2',
+                yaxis='y2'
+            )
         )
-        frame_data.append(
-            go.Scatter(x=time_points[:i+1], y=r23, name=f'Distance {scenario["bodies"][1]}-{scenario["bodies"][2]}',
-                      line=dict(color='green'), row=2, col=1)
-        )
-        
-        # Add velocity plot
-        velocities = np.gradient(positions[:i+1], time_points[1]-time_points[0], axis=0)
-        vel_mag = np.sqrt(velocities[:, ::2]**2 + velocities[:, 1::2]**2)
-        
-        for j in range(3):
             frame_data.append(
-                go.Scatter(x=time_points[:i+1], y=vel_mag[:, j],
-                          name=f'{scenario["bodies"][j]} Velocity',
-                          line=dict(color=body_colors[j]), row=2, col=2)
+                go.Scatter(
+                    x=time_points[:i+1], 
+                    y=r23, 
+                    name=f'Distance {scenario["bodies"][1]}-{scenario["bodies"][2]}',
+                    line=dict(color='green'),
+                    xaxis='x2',
+                    yaxis='y2'
+                )
             )
         
-        frames.append(go.Frame(data=frame_data, name=f'frame{i}'))
-    
+        # For velocity plots
+        for j in range(3):
+            frame_data.append(
+                go.Scatter(
+                    x=time_points[:i+1], 
+                    y=vel_mag[:, j],
+                    name=f'{scenario["bodies"][j]} Velocity',
+                    line=dict(color=body_colors[j]),
+                    xaxis='x3',  # Use xaxis3 for the third subplot
+                    yaxis='y3'   # Use yaxis3 for the third subplot
+                )
+            )        
+
+# For velocity plots
+        for j in range(3):
+            frame_data.append(
+                go.Scatter(
+                    x=time_points[:i+1], 
+                    y=vel_mag[:, j],
+                    name=f'{scenario["bodies"][j]} Velocity',
+                    line=dict(color=body_colors[j]),
+                    xaxis='x3',  # Use xaxis3 for the third subplot
+                    yaxis='y3'   # Use yaxis3 for the third subplot
+                )
+            )
     # Initial empty plot
     for j in range(3):
         # Trajectory trace
