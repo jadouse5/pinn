@@ -9,7 +9,8 @@ import io
 class CelestialBodyPINN(torch.nn.Module):
     def __init__(self, scenario_params=None):
         super().__init__()
-        # Fixed architecture to match the trained model exactly
+        
+        # Network layers defined individually to match state dict keys
         self.network = torch.nn.Sequential(
             torch.nn.Linear(1, 256),      # network.0
             torch.nn.Tanh(),              # network.1
@@ -45,21 +46,23 @@ def load_model_safely(uploaded_file, scenario_params):
         # Create model instance
         model = CelestialBodyPINN(scenario_params)
         
-        # Load state dict with detailed error checking
+        # Load state dict
         state_dict = torch.load(uploaded_file, map_location=torch.device('cpu'))
         
-        # Print model architectures for debugging
-        st.write("Model architecture:")
-        st.write("Current model layers:", [m for m in model.network])
-        st.write("State dict keys:", list(state_dict.keys()))
+        # Create new state dict with correct keys
+        new_state_dict = {}
+        for i in range(0, 11, 2):  # Only load Linear layer parameters
+            if f'network.{i}.weight' in state_dict:
+                new_state_dict[f'network.{i}.weight'] = state_dict[f'network.{i}.weight']
+                new_state_dict[f'network.{i}.bias'] = state_dict[f'network.{i}.bias']
         
-        model.load_state_dict(state_dict)
+        # Load the modified state dict
+        model.load_state_dict(new_state_dict, strict=False)
         model.eval()
         
         return model, None
     except Exception as e:
         return None, str(e)
-
 
 def create_orbit_plot(positions, scenario, time_points):
     """Create interactive orbital plot using plotly"""
