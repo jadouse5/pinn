@@ -6,21 +6,22 @@ from plotly.subplots import make_subplots
 import time
 from datetime import datetime
 import io
-
 class CelestialBodyPINN(torch.nn.Module):
     def __init__(self, scenario_params=None):
         super().__init__()
-        # Updated architecture to match the trained model
+        # Fixed architecture to match the trained model exactly
         self.network = torch.nn.Sequential(
-            torch.nn.Linear(1, 256),
-            torch.nn.Tanh(),
-            torch.nn.Linear(256, 256),
-            torch.nn.Tanh(),
-            torch.nn.Linear(256, 256),
-            torch.nn.Tanh(),
-            torch.nn.Linear(256, 256),
-            torch.nn.Tanh(),
-            torch.nn.Linear(256, 6)  # Final output layer
+            torch.nn.Linear(1, 256),      # network.0
+            torch.nn.Tanh(),              # network.1
+            torch.nn.Linear(256, 256),    # network.2
+            torch.nn.Tanh(),              # network.3
+            torch.nn.Linear(256, 256),    # network.4
+            torch.nn.Tanh(),              # network.5
+            torch.nn.Linear(256, 256),    # network.6
+            torch.nn.Tanh(),              # network.7
+            torch.nn.Linear(256, 256),    # network.8
+            torch.nn.Tanh(),              # network.9
+            torch.nn.Linear(256, 6)       # network.10
         )
         
         # Initialize physics parameters
