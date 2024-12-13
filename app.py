@@ -292,6 +292,209 @@ def create_orbit_plot(positions, scenario, time_points):
     
     return fig
 
+def create_comparison_plot(positions_pinn, positions_trad, scenario, time_points):
+    """Create interactive comparison plot showing both methods"""
+    
+    fig = make_subplots(rows=2, cols=2,
+                       specs=[[{}, {}],
+                             [{"colspan": 2}, None]],
+                       subplot_titles=('PINN Method', 'Traditional Method',
+                                     'Deviation Between Methods'))
+    
+    # Colors for bodies
+    colors = ['blue', 'gray', 'red']
+    body_sizes = [20, 15, 15]
+    
+    # Create animation frames
+    frames = []
+    for i in range(len(time_points)):
+        frame_data = []
+        
+        # PINN trajectories (left plot)
+        for j in range(3):
+            # Past trajectory
+            frame_data.append(
+                go.Scatter(
+                    x=positions_pinn[:i+1, j*2],
+                    y=positions_pinn[:i+1, j*2+1],
+                    mode='lines',
+                    line=dict(color=colors[j], width=1),
+                    opacity=0.5,
+                    showlegend=False,
+                    xaxis='x1',
+                    yaxis='y1'
+                )
+            )
+            
+            # Current position
+            frame_data.append(
+                go.Scatter(
+                    x=[positions_pinn[i, j*2]],
+                    y=[positions_pinn[i, j*2+1]],
+                    mode='markers',
+                    marker=dict(
+                        size=body_sizes[j],
+                        color=colors[j],
+                        symbol='circle',
+                        line=dict(color='white', width=1)
+                    ),
+                    name=f'{scenario["bodies"][j]} (PINN)',
+                    xaxis='x1',
+                    yaxis='y1'
+                )
+            )
+        
+        # Traditional method trajectories (right plot)
+        if positions_trad is not None:
+            for j in range(3):
+                frame_data.append(
+                    go.Scatter(
+                        x=positions_trad[:i+1, j*2],
+                        y=positions_trad[:i+1, j*2+1],
+                        mode='lines',
+                        line=dict(color=colors[j], width=1, dash='dot'),
+                        opacity=0.5,
+                        showlegend=False,
+                        xaxis='x2',
+                        yaxis='y2'
+                    )
+                )
+                
+                frame_data.append(
+                    go.Scatter(
+                        x=[positions_trad[i, j*2]],
+                        y=[positions_trad[i, j*2+1]],
+                        mode='markers',
+                        marker=dict(
+                            size=body_sizes[j],
+                            color=colors[j],
+                            symbol='square',
+                            line=dict(color='white', width=1)
+                        ),
+                        name=f'{scenario["bodies"][j]} (Traditional)',
+                        xaxis='x2',
+                        yaxis='y2'
+                    )
+                )
+            
+            # Calculate deviation between methods
+            deviation = np.sqrt(np.sum((positions_pinn[:i+1] - positions_trad[:i+1])**2, axis=1))
+            frame_data.append(
+                go.Scatter(
+                    x=time_points[:i+1],
+                    y=deviation,
+                    mode='lines',
+                    name='Method Deviation',
+                    line=dict(color='red'),
+                    xaxis='x3',
+                    yaxis='y3'
+                )
+            )
+        
+        frames.append(go.Frame(data=frame_data, name=f'frame{i}'))
+    
+    # Update layout
+    fig.update_layout(
+        height=800,
+        showlegend=True,
+        updatemenus=[{
+            'type': 'buttons',
+            'showactive': False,
+            'buttons': [
+                {
+                    'label': 'Play',
+                    'method': 'animate',
+                    'args': [None, {
+                        'frame': {'duration': 50, 'redraw': True},
+                        'fromcurrent': True,
+                        'transition': {'duration': 0}
+                    }]
+                },
+                {
+                    'label': 'Pause',
+                    'method': 'animate',
+                    'args': [[None], {
+                        'frame': {'duration': 0, 'redraw': False},
+                        'mode': 'immediate',
+                        'transition': {'duration': 0}
+                    }]
+                }
+            ]
+        }],
+        sliders=[{
+            'currentvalue': {'prefix': 'Time: ', 'suffix': ' s'},
+            'steps': [
+                {
+                    'args': [[f'frame{k}'], {
+                        'frame': {'duration': 0, 'redraw': True},
+                        'mode': 'immediate',
+                        'transition': {'duration': 0}
+                    }],
+                    'label': f'{time_points[k]:.1f}',
+                    'method': 'animate'
+                }
+                for k in range(0, len(time_points), max(1, len(time_points)//10))
+            ]
+        }]
+    )
+    
+    # Update axes
+    for i in range(1, 3):
+        fig.update_xaxes(title_text="X Position (km)", row=1, col=i)
+        fig.update_yaxes(title_text="Y Position (km)", row=1, col=i)
+    
+    fig.update_xaxes(title_text="Time (s)", row=2, col=1)
+    fig.update_yaxes(title_text="Deviation (km)", row=2, col=1)
+    
+    return fig
+
+# Add this to your main simulation code:
+if st.sidebar.button("Run Simulation"):
+    with st.spinner("Running simulation..."):
+        try:
+            # Generate time points
+            t_points = np.linspace(0, t_end, n_points)
+            t = torch.tensor(t_points, dtype=torch.float32).reshape(-1, 1)
+            
+            # Get PINN predictions
+            with torch.no_grad():
+                positions_pinn = model(t).numpy()
+            
+            # Get traditional method predictions if requested
+            positions_trad = None
+            if show_comparison:
+                trad_solver = TraditionalSolver(
+                    G=scenario['G'],
+                    m1=scenario['masses'][0],
+                    m2=scenario['masses'][1],
+                    m3=scenario['masses'][2]
+                )
+                initial_state = np.concatenate([
+                    positions_pinn[0],  # Initial positions
+                    np.zeros(6)         # Initial velocities
+                ])
+                positions_trad = odeint(trad_solver.derivatives, initial_state, t_points)[:, :6]
+            
+            # Create comparison plot
+            fig = create_comparison_plot(positions_pinn, positions_trad, scenario, t_points)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Add chaos analysis
+            if show_comparison and positions_trad is not None:
+                deviation = np.sqrt(np.sum((positions_pinn - positions_trad)**2, axis=1))
+                chaos_time = t_points[np.where(deviation > 1e3)[0][0]] if np.any(deviation > 1e3) else None
+                
+                st.write("### Chaos Analysis")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Maximum Deviation", f"{deviation.max():.2e} km")
+                with col2:
+                    if chaos_time:
+                        st.metric("Time to Chaos", f"{chaos_time/3600/24:.1f} days")
+                    else:
+                        st.metric("Time to Chaos", "Not reached")
+                        
+
 def main():
     st.set_page_config(page_title="Celestial Body Simulator", layout="wide")
     
@@ -373,6 +576,34 @@ def main():
             format="%.2e"
         )
         n_points = st.sidebar.slider("Number of Points", 100, 2000, 1000)
+
+         # Time controls
+    st.sidebar.header("Time Settings")
+    time_unit = st.sidebar.selectbox(
+        "Time Unit", 
+        ["Days", "Months", "Years"]
+    )
+    
+    time_value = st.sidebar.number_input(
+        f"Number of {time_unit}", 
+        min_value=1, 
+        max_value=1000, 
+        value=1
+    )
+    
+    # Convert to seconds based on unit
+    time_multipliers = {
+        "Days": 24 * 3600,
+        "Months": 30 * 24 * 3600,
+        "Years": 365 * 24 * 3600
+    }
+    t_end = time_value * time_multipliers[time_unit]
+    
+    # Comparison settings
+    show_comparison = st.sidebar.checkbox("Compare with Traditional Method")
+    
+    if show_comparison:
+        st.sidebar.warning("Traditional method may show chaotic behavior over long periods")
         
         # Run simulation
         if st.sidebar.button("Run Simulation"):
