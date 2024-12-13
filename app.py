@@ -7,11 +7,10 @@ import time
 from datetime import datetime
 import io
 
-
 class CelestialBodyPINN(torch.nn.Module):
     def __init__(self, scenario_params=None):
         super().__init__()
-        # Standard architecture to match trained model
+        # Updated architecture to match the trained model
         self.network = torch.nn.Sequential(
             torch.nn.Linear(1, 256),
             torch.nn.Tanh(),
@@ -19,7 +18,9 @@ class CelestialBodyPINN(torch.nn.Module):
             torch.nn.Tanh(),
             torch.nn.Linear(256, 256),
             torch.nn.Tanh(),
-            torch.nn.Linear(256, 6)
+            torch.nn.Linear(256, 256),
+            torch.nn.Tanh(),
+            torch.nn.Linear(256, 6)  # Final output layer
         )
         
         # Initialize physics parameters
@@ -43,18 +44,21 @@ def load_model_safely(uploaded_file, scenario_params):
         # Create model instance
         model = CelestialBodyPINN(scenario_params)
         
-        # Read file bytes
-        bytes_data = uploaded_file.getvalue()
-        buffer = io.BytesIO(bytes_data)
+        # Load state dict with detailed error checking
+        state_dict = torch.load(uploaded_file, map_location=torch.device('cpu'))
         
-        # Load state dict
-        state_dict = torch.load(buffer, map_location=torch.device('cpu'))
+        # Print model architectures for debugging
+        st.write("Model architecture:")
+        st.write("Current model layers:", [m for m in model.network])
+        st.write("State dict keys:", list(state_dict.keys()))
+        
         model.load_state_dict(state_dict)
         model.eval()
         
         return model, None
     except Exception as e:
         return None, str(e)
+
 
 def create_orbit_plot(positions, scenario, time_points):
     """Create interactive orbital plot using plotly"""
@@ -132,7 +136,7 @@ def main():
     Explore different three-body celestial systems using Physics-Informed Neural Networks.
     Select a predefined scenario or create your own!
     """)
-    
+
     # Initialize session state if needed
     if 'model' not in st.session_state:
         st.session_state.model = None
