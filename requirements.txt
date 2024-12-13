@@ -1,0 +1,9 @@
+streamlit
+torch
+numpy
+plotly
+pandas
+matplotlib
+tqdm
+scipy
+ipython
