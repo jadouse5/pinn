@@ -1,230 +1,168 @@
 import streamlit as st
 import torch
 import numpy as np
+from scipy.integrate import odeint
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import plotly.express as px
-import pandas as pd
+import time
 from datetime import datetime
 
-# Three-Body PINN Model
-class ThreeBodyPINN(torch.nn.Module):
-    def __init__(self, hidden_layers=[128, 128, 128, 128]):
-        super().__init__()
-        layers = []
-        prev_dim = 1
-        for h_dim in hidden_layers:
-            layers.append(torch.nn.Linear(prev_dim, h_dim))
-            layers.append(torch.nn.Tanh())
-            prev_dim = h_dim
-        layers.append(torch.nn.Linear(prev_dim, 6))
-        self.network = torch.nn.Sequential(*layers)
-        self.G = 6.67430e-11
-        self.m1 = 1.0
-        self.m2 = 1.0
-        self.m3 = 1.0
+class TraditionalSolver:
+    """Traditional numerical solver using scipy's odeint"""
+    def __init__(self, G=6.67430e-11, m1=1.0, m2=1.0, m3=1.0):
+        self.G = G
+        self.m1, self.m2, self.m3 = m1, m2, m3
+    
+    def derivatives(self, state, t):
+        x1, y1, x2, y2, x3, y3, vx1, vy1, vx2, vy2, vx3, vy3 = state
+        
+        # Compute distances
+        r12 = np.sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        r13 = np.sqrt((x1 - x3)**2 + (y1 - y3)**2)
+        r23 = np.sqrt((x2 - x3)**2 + (y2 - y3)**2)
+        
+        # Compute accelerations
+        ax1 = self.G * (self.m2 * (x2 - x1) / r12**3 + self.m3 * (x3 - x1) / r13**3)
+        ay1 = self.G * (self.m2 * (y2 - y1) / r12**3 + self.m3 * (y3 - y1) / r13**3)
+        
+        ax2 = self.G * (self.m1 * (x1 - x2) / r12**3 + self.m3 * (x3 - x2) / r23**3)
+        ay2 = self.G * (self.m1 * (y1 - y2) / r12**3 + self.m3 * (y3 - y2) / r23**3)
+        
+        ax3 = self.G * (self.m1 * (x1 - x3) / r13**3 + self.m2 * (x2 - x3) / r23**3)
+        ay3 = self.G * (self.m1 * (y1 - y3) / r13**3 + self.m2 * (y2 - y3) / r23**3)
+        
+        return [vx1, vy1, vx2, vy2, vx3, vy3, ax1, ay1, ax2, ay2, ax3, ay3]
 
-    def forward(self, t):
-        return self.network(t)
-
-# Predefined scenarios
-class ThreeBodyScenarios:
-    @staticmethod
-    def get_scenarios():
-        return {
-            'Figure Eight': {
-                'masses': [1.0, 1.0, 1.0],
-                'G': 1.0,
-                'description': 'Three equal masses orbiting in a figure-8 pattern'
-            },
-            'Sun-Jupiter-Asteroid': {
-                'masses': [1.0, 0.000954786, 1e-10],
-                'G': 39.5,
-                'description': 'Sun-Jupiter-Asteroid system showing orbital resonances'
-            },
-            'Earth-Moon-Satellite': {
-                'masses': [1.0, 0.0123, 1e-15],
-                'G': 6.67430e-11,
-                'description': 'Earth-Moon-Satellite system showing Lagrange points'
-            },
-            'Lagrange Equilibrium': {
-                'masses': [1.0, 1.0, 1.0],
-                'G': 1.0,
-                'description': 'Stable equilateral triangle configuration'
-            },
-            'Custom': {
-                'masses': [1.0, 1.0, 1.0],
-                'G': 1.0,
-                'description': 'Define your own masses and gravitational constant'
-            }
-        }
-
-def predict_trajectories(model, t_range, n_points=1000):
-    """Get predictions from the PINN model"""
+def compare_methods(pinn_model, t_range, n_points=1000):
+    """Compare PINN and traditional methods"""
+    # Time points
     t_points = np.linspace(t_range[0], t_range[1], n_points)
-    t = torch.tensor(t_points, dtype=torch.float32).reshape(-1, 1)
     
+    # PINN predictions
+    t_tensor = torch.tensor(t_points, dtype=torch.float32).reshape(-1, 1)
+    start_time = time.time()
     with torch.no_grad():
-        positions = model(t).numpy()
+        pinn_positions = pinn_model(t_tensor).numpy()
+    pinn_time = time.time() - start_time
     
-    return t_points, positions
+    # Traditional method
+    solver = TraditionalSolver(G=pinn_model.G, m1=pinn_model.m1, m2=pinn_model.m2, m3=pinn_model.m3)
+    initial_conditions = np.concatenate([pinn_positions[0], np.zeros(6)])  # positions and velocities
+    
+    start_time = time.time()
+    try:
+        trad_solution = odeint(solver.derivatives, initial_conditions, t_points)
+        trad_positions = trad_solution[:, :6]
+        trad_time = time.time() - start_time
+        trad_success = True
+    except:
+        trad_positions = np.nan * np.ones_like(pinn_positions)
+        trad_time = time.time() - start_time
+        trad_success = False
+    
+    return {
+        't': t_points,
+        'pinn': pinn_positions,
+        'traditional': trad_positions,
+        'computation_time': {'pinn': pinn_time, 'traditional': trad_time},
+        'trad_success': trad_success
+    }
 
-def create_interactive_plot(t, positions, masses):
-    """Create interactive Plotly visualization"""
-    # Create figure with secondary y-axis
+def create_comparison_plot(results):
+    """Create interactive comparison plot"""
     fig = make_subplots(rows=2, cols=2,
                        specs=[[{"colspan": 2}, None],
                              [{"type": "scatter"}, {"type": "scatter"}]],
-                       subplot_titles=('Trajectories', 'Distances Between Bodies', 
-                                     'Relative Velocities'))
+                       subplot_titles=('Trajectories Comparison',
+                                     'Position Differences', 'Method Stability'))
     
-    # Colors for each body
+    # Trajectories
     colors = ['red', 'blue', 'green']
-    names = [f'Body {i+1} (m={masses[i]:.2e})' for i in range(3)]
-    
-    # Add trajectories
     for i in range(3):
+        # PINN trajectories
         fig.add_trace(
-            go.Scatter(x=positions[:, i*2], y=positions[:, i*2+1],
-                      mode='lines+markers',
-                      name=names[i],
-                      line=dict(color=colors[i]),
-                      marker=dict(color=colors[i], size=8)),
+            go.Scatter(x=results['pinn'][:, i*2], y=results['pinn'][:, i*2+1],
+                      mode='lines', name=f'Body {i+1} (PINN)',
+                      line=dict(color=colors[i], width=2)),
             row=1, col=1
         )
+        
+        # Traditional method trajectories
+        if results['trad_success']:
+            fig.add_trace(
+                go.Scatter(x=results['traditional'][:, i*2], y=results['traditional'][:, i*2+1],
+                          mode='lines', name=f'Body {i+1} (Traditional)',
+                          line=dict(color=colors[i], dash='dash', width=2)),
+                row=1, col=1
+            )
     
-    # Calculate and plot distances between bodies
-    r12 = np.sqrt((positions[:, 0] - positions[:, 2])**2 + 
-                  (positions[:, 1] - positions[:, 3])**2)
-    r13 = np.sqrt((positions[:, 0] - positions[:, 4])**2 + 
-                  (positions[:, 1] - positions[:, 5])**2)
-    r23 = np.sqrt((positions[:, 2] - positions[:, 4])**2 + 
-                  (positions[:, 3] - positions[:, 5])**2)
+    # Position differences
+    if results['trad_success']:
+        for i in range(3):
+            diff = np.sqrt(
+                (results['pinn'][:, i*2] - results['traditional'][:, i*2])**2 +
+                (results['pinn'][:, i*2+1] - results['traditional'][:, i*2+1])**2
+            )
+            fig.add_trace(
+                go.Scatter(x=results['t'], y=diff,
+                          name=f'Body {i+1} Difference',
+                          line=dict(color=colors[i])),
+                row=2, col=1
+            )
     
-    fig.add_trace(
-        go.Scatter(x=t, y=r12, name='Distance 1-2', line=dict(color='purple')),
-        row=2, col=1
-    )
-    fig.add_trace(
-        go.Scatter(x=t, y=r13, name='Distance 1-3', line=dict(color='orange')),
-        row=2, col=1
-    )
-    fig.add_trace(
-        go.Scatter(x=t, y=r23, name='Distance 2-3', line=dict(color='brown')),
-        row=2, col=1
-    )
-    
-    # Calculate and plot relative velocities
-    dt = t[1] - t[0]
-    vel_x = np.gradient(positions, dt, axis=0)
-    vel_mag = np.sqrt(vel_x[:, ::2]**2 + vel_x[:, 1::2]**2)
-    
+    # Method stability
     for i in range(3):
+        # PINN stability
+        pinn_stability = np.sqrt(
+            np.gradient(results['pinn'][:, i*2])**2 +
+            np.gradient(results['pinn'][:, i*2+1])**2
+        )
         fig.add_trace(
-            go.Scatter(x=t, y=vel_mag[:, i], 
-                      name=f'Velocity {i+1}',
+            go.Scatter(x=results['t'], y=pinn_stability,
+                      name=f'Body {i+1} Stability (PINN)',
                       line=dict(color=colors[i])),
             row=2, col=2
         )
+        
+        # Traditional method stability
+        if results['trad_success']:
+            trad_stability = np.sqrt(
+                np.gradient(results['traditional'][:, i*2])**2 +
+                np.gradient(results['traditional'][:, i*2+1])**2
+            )
+            fig.add_trace(
+                go.Scatter(x=results['t'], y=trad_stability,
+                          name=f'Body {i+1} Stability (Traditional)',
+                          line=dict(color=colors[i], dash='dash')),
+                row=2, col=2
+            )
     
     # Update layout
-    fig.update_layout(
-        height=800,
-        showlegend=True,
-        title_text="Three-Body System Analysis",
-    )
-    
-    # Update axes labels
-    fig.update_xaxes(title_text="X Position", row=1, col=1)
-    fig.update_yaxes(title_text="Y Position", row=1, col=1)
-    fig.update_xaxes(title_text="Time", row=2, col=1)
-    fig.update_yaxes(title_text="Distance", row=2, col=1)
-    fig.update_xaxes(title_text="Time", row=2, col=2)
-    fig.update_yaxes(title_text="Velocity Magnitude", row=2, col=2)
+    fig.update_layout(height=800, showlegend=True,
+                     title_text="PINN vs Traditional Method Comparison")
     
     return fig
 
 def main():
-    st.set_page_config(page_title="Three-Body Explorer", layout="wide")
+    st.set_page_config(page_title="Three-Body Comparison", layout="wide")
     
-    st.title("Three-Body System Explorer")
+    st.title("Three-Body Problem: PINN vs Traditional Methods")
     st.write("""
-    Explore different three-body configurations using Physics-Informed Neural Networks.
-    Visualize trajectories, distances, and velocities for various scenarios.
+    Compare the performance of Physics-Informed Neural Networks (PINNs) with traditional
+    numerical methods for solving the three-body problem over long time periods.
     """)
     
-    # Sidebar for configuration
-    st.sidebar.header("Configuration")
-    
     # Model loading
+    st.sidebar.header("Model Configuration")
     uploaded_model = st.sidebar.file_uploader("Upload trained PINN model (.pth)", type='pth')
-    if uploaded_model is None:
-        st.warning("Please upload a trained model to continue")
-        return
     
-    # Load model
-    model = ThreeBodyPINN()
-    model.load_state_dict(torch.load(uploaded_model, map_location=torch.device('cpu')))
-    model.eval()
-    
-    # Scenario selection
-    scenarios = ThreeBodyScenarios.get_scenarios()
-    scenario_name = st.sidebar.selectbox("Select Scenario", list(scenarios.keys()))
-    scenario = scenarios[scenario_name]
-    
-    st.sidebar.markdown(f"**Description:** {scenario['description']}")
-    
-    # Time parameters
-    st.sidebar.header("Time Parameters")
-    t_start = st.sidebar.number_input("Start Time", value=0.0)
-    t_end = st.sidebar.number_input("End Time", value=10.0)
-    n_points = st.sidebar.slider("Number of Points", 100, 2000, 1000)
-    
-    # Mass configuration
-    st.sidebar.header("Mass Configuration")
-    if scenario_name == 'Custom':
-        m1 = st.sidebar.number_input("Mass 1", value=1.0, format="%.8f")
-        m2 = st.sidebar.number_input("Mass 2", value=1.0, format="%.8f")
-        m3 = st.sidebar.number_input("Mass 3", value=1.0, format="%.8f")
-        G = st.sidebar.number_input("Gravitational Constant", value=1.0, format="%.8f")
-    else:
-        m1, m2, m3 = scenario['masses']
-        G = scenario['G']
-        st.sidebar.write(f"Mass 1: {m1:.2e}")
-        st.sidebar.write(f"Mass 2: {m2:.2e}")
-        st.sidebar.write(f"Mass 3: {m3:.2e}")
-        st.sidebar.write(f"G: {G:.2e}")
-    
-    # Update model parameters
-    model.m1, model.m2, model.m3 = m1, m2, m3
-    model.G = G
-    
-    # Run simulation button
-    if st.sidebar.button("Run Simulation"):
-        with st.spinner("Running simulation..."):
-            # Get predictions
-            t, positions = predict_trajectories(model, [t_start, t_end], n_points)
-            
-            # Create interactive plot
-            fig = create_interactive_plot(t, positions, [m1, m2, m3])
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Save results
-            results_df = pd.DataFrame({
-                'Time': np.repeat(t, 3),
-                'Body': ['Body 1'] * len(t) + ['Body 2'] * len(t) + ['Body 3'] * len(t),
-                'X': np.concatenate([positions[:, 0], positions[:, 2], positions[:, 4]]),
-                'Y': np.concatenate([positions[:, 1], positions[:, 3], positions[:, 5]])
-            })
-            
-            # Download results
-            st.download_button(
-                "Download Results CSV",
-                results_df.to_csv(index=False).encode('utf-8'),
-                f"three_body_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                "text/csv",
-                key='download-csv'
-            )
-
-if __name__ == "__main__":
-    main()
+    if uploaded_model is not None:
+        model = ThreeBodyPINN()
+        model.load_state_dict(torch.load(uploaded_model, weights_only=True))
+        model.eval()
+        
+        # Time range selection
+        st.sidebar.header("Time Range")
+        t_start = st.sidebar.number_input("Start Time", value=0.0)
+        t_end = st.sidebar.number_input("End Time", value=100.0, max_value=1000.0)
+        n_points = st.sidebar.slider("
