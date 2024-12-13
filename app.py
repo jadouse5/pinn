@@ -3,9 +3,37 @@ import torch
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from scipy.integrate import odeint
 import time
 from datetime import datetime
 import io
+
+
+class TraditionalSolver:
+    def __init__(self, G=6.67430e-20, m1=1.0, m2=1.0, m3=1.0):
+        self.G = G
+        self.m1, self.m2, self.m3 = m1, m2, m3
+    
+    def derivatives(self, state, t):
+        x1, y1, x2, y2, x3, y3, vx1, vy1, vx2, vy2, vx3, vy3 = state
+        
+        # Compute distances
+        r12 = np.sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        r13 = np.sqrt((x1 - x3)**2 + (y1 - y3)**2)
+        r23 = np.sqrt((x2 - x3)**2 + (y2 - y3)**2)
+        
+        # Compute accelerations
+        ax1 = self.G * (self.m2 * (x2 - x1) / r12**3 + self.m3 * (x3 - x1) / r13**3)
+        ay1 = self.G * (self.m2 * (y2 - y1) / r12**3 + self.m3 * (y3 - y1) / r13**3)
+        
+        ax2 = self.G * (self.m1 * (x1 - x2) / r12**3 + self.m3 * (x3 - x2) / r23**3)
+        ay2 = self.G * (self.m1 * (y1 - y2) / r12**3 + self.m3 * (y3 - y2) / r23**3)
+        
+        ax3 = self.G * (self.m1 * (x1 - x3) / r13**3 + self.m2 * (x2 - x3) / r23**3)
+        ay3 = self.G * (self.m1 * (y1 - y3) / r13**3 + self.m2 * (y2 - y3) / r23**3)
+        
+        return [vx1, vy1, vx2, vy2, vx3, vy3, ax1, ay1, ax2, ay2, ax3, ay3]
+        
 
 class CelestialBodyPINN(torch.nn.Module):
     def __init__(self, scenario_params=None):
@@ -447,52 +475,6 @@ def create_comparison_plot(positions_pinn, positions_trad, scenario, time_points
     fig.update_yaxes(title_text="Deviation (km)", row=2, col=1)
     
     return fig
-
-# Add this to your main simulation code:
-if st.sidebar.button("Run Simulation"):
-    with st.spinner("Running simulation..."):
-        try:
-            # Generate time points
-            t_points = np.linspace(0, t_end, n_points)
-            t = torch.tensor(t_points, dtype=torch.float32).reshape(-1, 1)
-            
-            # Get PINN predictions
-            with torch.no_grad():
-                positions_pinn = model(t).numpy()
-            
-            # Get traditional method predictions if requested
-            positions_trad = None
-            if show_comparison:
-                trad_solver = TraditionalSolver(
-                    G=scenario['G'],
-                    m1=scenario['masses'][0],
-                    m2=scenario['masses'][1],
-                    m3=scenario['masses'][2]
-                )
-                initial_state = np.concatenate([
-                    positions_pinn[0],  # Initial positions
-                    np.zeros(6)         # Initial velocities
-                ])
-                positions_trad = odeint(trad_solver.derivatives, initial_state, t_points)[:, :6]
-            
-            # Create comparison plot
-            fig = create_comparison_plot(positions_pinn, positions_trad, scenario, t_points)
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Add chaos analysis
-            if show_comparison and positions_trad is not None:
-                deviation = np.sqrt(np.sum((positions_pinn - positions_trad)**2, axis=1))
-                chaos_time = t_points[np.where(deviation > 1e3)[0][0]] if np.any(deviation > 1e3) else None
-                
-                st.write("### Chaos Analysis")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Maximum Deviation", f"{deviation.max():.2e} km")
-                with col2:
-                    if chaos_time:
-                        st.metric("Time to Chaos", f"{chaos_time/3600/24:.1f} days")
-                    else:
-                        st.metric("Time to Chaos", "Not reached")
                         
 def main():
     try:
@@ -668,6 +650,7 @@ def main():
     except Exception as e:
         st.error(f"Application error: {str(e)}")
         st.error("Full error:", exc_info=True)
+
 
 if __name__ == "__main__":
     main()
