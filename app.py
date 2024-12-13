@@ -74,7 +74,9 @@ def load_model_safely(uploaded_file, scenario_params):
         return model, None
     except Exception as e:
         return None, str(e)
-        def create_orbit_plot(positions, scenario, time_points):
+        
+
+def create_orbit_plot(positions, scenario, time_points):
     """Create interactive orbital plot with rotating bodies"""
     
     fig = make_subplots(rows=2, cols=2,
