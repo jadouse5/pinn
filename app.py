@@ -95,7 +95,7 @@ def create_orbit_plot(positions, scenario, time_points):
         frame_data = []
         
         # Add trajectory traces for each body
-        for j in range(3):
+    for j in range(3):
             # Trajectory up to current time
             frame_data.append(
                 go.Scatter(
@@ -165,7 +165,7 @@ def create_orbit_plot(positions, scenario, time_points):
             )
         
         # For velocity plots
-        for j in range(3):
+    for j in range(3):
             frame_data.append(
                 go.Scatter(
                     x=time_points[:i+1], 
