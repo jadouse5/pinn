@@ -6,10 +6,12 @@ from plotly.subplots import make_subplots
 import time
 from datetime import datetime
 
+
 class CelestialBodyPINN(torch.nn.Module):
     def __init__(self, scenario_params=None):
         super().__init__()
-        layers = [
+        # Standard architecture to match trained model
+        self.network = torch.nn.Sequential(
             torch.nn.Linear(1, 256),
             torch.nn.Tanh(),
             torch.nn.Linear(256, 256),
@@ -17,15 +19,14 @@ class CelestialBodyPINN(torch.nn.Module):
             torch.nn.Linear(256, 256),
             torch.nn.Tanh(),
             torch.nn.Linear(256, 6)
-        ]
-        self.network = torch.nn.Sequential(*layers)
+        )
         
-        # Default to Earth-Moon-Mars if no scenario provided
+        # Initialize physics parameters
         if scenario_params is None:
-            self.G = 6.67430e-20  # km³/kg/s²
-            self.m1 = 5.972e24    # Earth mass
-            self.m2 = 7.342e22    # Moon mass
-            self.m3 = 6.39e23     # Mars mass
+            self.G = 6.67430e-20
+            self.m1 = 5.972e24
+            self.m2 = 7.342e22
+            self.m3 = 6.39e23
         else:
             self.G = scenario_params['G']
             self.m1 = scenario_params['masses'][0]
@@ -35,53 +36,24 @@ class CelestialBodyPINN(torch.nn.Module):
     def forward(self, t):
         return self.network(t)
 
-class CelestialScenarios:
-    """Predefined celestial body scenarios"""
-    
-    @staticmethod
-    def get_scenarios():
-        return {
-            'Earth-Moon-Mars': {
-                'bodies': ['Earth', 'Moon', 'Mars'],
-                'masses': [5.972e24, 7.342e22, 6.39e23],
-                'distances': [0, 384400, 225e6],
-                'velocities': [29.78, 1.022, 24.077],
-                'G': 6.67430e-20,
-                'time_scale': 365*24*3600,  # 1 year in seconds
-                'display_scale': 'log',
-                'description': 'Classical Earth-Moon-Mars system'
-            },
-            'Sun-Earth-Jupiter': {
-                'bodies': ['Sun', 'Earth', 'Jupiter'],
-                'masses': [1.989e30, 5.972e24, 1.898e27],
-                'distances': [0, 149.6e6, 778.5e6],
-                'velocities': [0, 29.78, 13.07],
-                'G': 6.67430e-20,
-                'time_scale': 365*24*3600*12,  # 12 years
-                'display_scale': 'log',
-                'description': 'Major solar system bodies'
-            },
-            'Earth-Moon-Satellite': {
-                'bodies': ['Earth', 'Moon', 'Satellite'],
-                'masses': [5.972e24, 7.342e22, 1000],
-                'distances': [0, 384400, 42164],
-                'velocities': [0, 1.022, 3.075],
-                'G': 6.67430e-20,
-                'time_scale': 28*24*3600,  # 28 days
-                'display_scale': 'linear',
-                'description': 'Earth-Moon system with geostationary satellite'
-            },
-            'Custom': {
-                'bodies': ['Body 1', 'Body 2', 'Body 3'],
-                'masses': [1.0, 1.0, 1.0],
-                'distances': [0, 1, 2],
-                'velocities': [0, 1, 1],
-                'G': 1.0,
-                'time_scale': 1.0,
-                'display_scale': 'linear',
-                'description': 'Create your own three-body system'
-            }
-        }
+def load_model_safely(uploaded_file, scenario_params):
+    """Safely load the model with error handling"""
+    try:
+        # Create model instance
+        model = CelestialBodyPINN(scenario_params)
+        
+        # Read file bytes
+        bytes_data = uploaded_file.getvalue()
+        buffer = io.BytesIO(bytes_data)
+        
+        # Load state dict
+        state_dict = torch.load(buffer, map_location=torch.device('cpu'))
+        model.load_state_dict(state_dict)
+        model.eval()
+        
+        return model, None
+    except Exception as e:
+        return None, str(e)
 
 def create_orbit_plot(positions, scenario, time_points):
     """Create interactive orbital plot using plotly"""
@@ -160,90 +132,109 @@ def main():
     Select a predefined scenario or create your own!
     """)
     
-    # Get scenarios
-    scenarios = CelestialScenarios.get_scenarios()
+    # Initialize session state if needed
+    if 'model' not in st.session_state:
+        st.session_state.model = None
     
-    # Sidebar for configuration
+    # Predefined scenarios
+    scenarios = {
+        'Earth-Moon-Mars': {
+            'bodies': ['Earth', 'Moon', 'Mars'],
+            'masses': [5.972e24, 7.342e22, 6.39e23],
+            'distances': [0, 384400, 225e6],
+            'velocities': [29.78, 1.022, 24.077],
+            'G': 6.67430e-20,
+            'time_scale': 365*24*3600,
+            'display_scale': 'log',
+            'description': 'Classical Earth-Moon-Mars system'
+        },
+        'Sun-Earth-Jupiter': {
+            'bodies': ['Sun', 'Earth', 'Jupiter'],
+            'masses': [1.989e30, 5.972e24, 1.898e27],
+            'distances': [0, 149.6e6, 778.5e6],
+            'velocities': [0, 29.78, 13.07],
+            'G': 6.67430e-20,
+            'time_scale': 365*24*3600*12,
+            'display_scale': 'log',
+            'description': 'Major solar system bodies'
+        },
+        'Earth-Moon-Satellite': {
+            'bodies': ['Earth', 'Moon', 'Satellite'],
+            'masses': [5.972e24, 7.342e22, 1000],
+            'distances': [0, 384400, 42164],
+            'velocities': [0, 1.022, 3.075],
+            'G': 6.67430e-20,
+            'time_scale': 28*24*3600,
+            'display_scale': 'linear',
+            'description': 'Earth-Moon system with geostationary satellite'
+        }
+    }
+    
+    # Sidebar configuration
     st.sidebar.header("Configuration")
     
     # Scenario selection
-    scenario_name = st.sidebar.selectbox(
-        "Select Scenario",
-        list(scenarios.keys())
-    )
+    scenario_name = st.sidebar.selectbox("Select Scenario", list(scenarios.keys()))
     scenario = scenarios[scenario_name]
     
     st.sidebar.markdown(f"**Description:** {scenario['description']}")
     
-    # Custom parameters if selected
-    if scenario_name == 'Custom':
-        st.sidebar.header("Custom Parameters")
-        
-        # Mass inputs
-        masses = []
-        for i, body in enumerate(scenario['bodies']):
-            mass = st.sidebar.number_input(f"Mass of {body} (kg)", 
-                                         value=float(scenario['masses'][i]),
-                                         format="%.2e")
-            masses.append(mass)
-        scenario['masses'] = masses
-        
-        # Distance inputs
-        distances = []
-        for i, body in enumerate(scenario['bodies']):
-            if i > 0:  # First body at origin
-                dist = st.sidebar.number_input(f"Distance of {body} from origin (km)",
-                                             value=float(scenario['distances'][i]),
-                                             format="%.2e")
-                distances.append(dist)
-        scenario['distances'] = [0] + distances
-        
-        # Time scale
-        scenario['time_scale'] = st.sidebar.number_input(
-            "Time Scale (seconds)",
-            value=float(scenario['time_scale']),
-            format="%.2e"
-        )
-    
     # Model loading
-    uploaded_model = st.sidebar.file_uploader("Upload trained PINN model (.pth)", type='pth')
+    uploaded_model = st.sidebar.file_uploader(
+        "Upload trained PINN model (.pth)", 
+        type='pth',
+        help="Upload your trained PINN model"
+    )
     
     if uploaded_model is not None:
-        # Load model with scenario parameters
-        model = CelestialBodyPINN(scenario)
-        model.load_state_dict(torch.load(uploaded_model, map_location=torch.device('cpu')))
-        model.eval()
+        # Load model
+        model, error = load_model_safely(uploaded_model, scenario)
+        
+        if error:
+            st.error(f"Error loading model: {error}")
+            return
+        
+        st.session_state.model = model
         
         # Simulation parameters
         st.sidebar.header("Simulation Parameters")
-        t_start = 0.0
-        t_end = st.sidebar.number_input("Simulation Time (seconds)", 
-                                       value=float(scenario['time_scale']),
-                                       format="%.2e")
+        t_end = st.sidebar.number_input(
+            "Simulation Time (seconds)", 
+            value=float(scenario['time_scale']),
+            format="%.2e"
+        )
         n_points = st.sidebar.slider("Number of Points", 100, 2000, 1000)
         
-        # Run simulation button
+        # Run simulation
         if st.sidebar.button("Run Simulation"):
             with st.spinner("Running simulation..."):
-                # Get predictions
-                t_points = np.linspace(t_start, t_end, n_points)
-                t = torch.tensor(t_points, dtype=torch.float32).reshape(-1, 1)
-                
-                with torch.no_grad():
-                    positions = model(t).numpy()
-                
-                # Create visualization
-                fig = create_orbit_plot(positions, scenario, t_points)
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Display system information
-                st.write("### System Information")
-                for i, body in enumerate(scenario['bodies']):
-                    st.write(f"**{body}:**")
-                    st.write(f"- Mass: {scenario['masses'][i]:.2e} kg")
-                    st.write(f"- Initial distance: {scenario['distances'][i]:.2e} km")
-                    if i > 0:
-                        st.write(f"- Initial velocity: {scenario['velocities'][i]:.2e} km/s")
+                try:
+                    # Generate time points
+                    t_points = np.linspace(0, t_end, n_points)
+                    t = torch.tensor(t_points, dtype=torch.float32).reshape(-1, 1)
+                    
+                    # Get predictions
+                    with torch.no_grad():
+                        positions = model(t).numpy()
+                    
+                    # Create plots
+                    fig = create_orbit_plot(positions, scenario, t_points)
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Display system information
+                    st.write("### System Information")
+                    col1, col2, col3 = st.columns(3)
+                    
+                    for i, (body, col) in enumerate(zip(scenario['bodies'], [col1, col2, col3])):
+                        with col:
+                            st.write(f"**{body}**")
+                            st.write(f"Mass: {scenario['masses'][i]:.2e} kg")
+                            st.write(f"Distance: {scenario['distances'][i]:.2e} km")
+                            if i > 0:
+                                st.write(f"Velocity: {scenario['velocities'][i]:.2e} km/s")
+                    
+                except Exception as e:
+                    st.error(f"Error during simulation: {str(e)}")
     else:
         st.warning("Please upload a trained model to continue")
 
