@@ -129,46 +129,53 @@ def create_orbit_plot(positions, scenario, time_points):
         full_velocities[:, i] = np.gradient(positions[:, i], dt)
     
     full_vel_mag = np.sqrt(full_velocities[:, ::2]**2 + full_velocities[:, 1::2]**2)
+
+    initial_data = []
+    for j in range(3):
+            # Initial trajectory trace
+            initial_data.append(
+                go.Scatter(
+                    x=[positions[0, j*2]],
+                    y=[positions[0, j*2+1]],
+                    mode='lines+markers',
+                    line=dict(color=body_colors[j], width=2),
+                    marker=dict(size=body_sizes[j], color=body_colors[j]),
+                    name=scenario['bodies'][j]
+                )
+            )
+        
+        fig.add_traces(initial_data)
     
     # Create animation frames
+        
     frames = []
     for i in range(len(time_points)):
         frame_data = []
         
         # Add trajectory traces for each body
         for j in range(3):
-            # Trajectory up to current time
+            # Full trajectory up to current time
             frame_data.append(
                 go.Scatter(
                     x=positions[:i+1, j*2],
                     y=positions[:i+1, j*2+1],
-                    mode='lines',
-                    line=dict(color=body_colors[j], width=1),
-                    opacity=0.5,
-                    showlegend=False,
-                    xaxis='x',
-                    yaxis='y'
-                )
-            )
-            
-            # Current position with rotating marker
-            frame_data.append(
-                go.Scatter(
-                    x=[positions[i, j*2]],
-                    y=[positions[i, j*2+1]],
-                    mode='markers',
+                    mode='lines+markers',
+                    line=dict(color=body_colors[j], width=2),
                     marker=dict(
                         size=body_sizes[j],
                         color=body_colors[j],
-                        symbol='circle',
-                        line=dict(color='white', width=1)
+                        symbol='circle'
                     ),
                     name=scenario['bodies'][j],
-                    xaxis='x',
-                    yaxis='y'
+                    showlegend=False
                 )
             )
         
+        frames.append(go.Frame(
+            data=frame_data,
+            traces=[0, 1, 2],  # Match with initial traces
+            name=f'frame{i}'
+        ))
         # Add distance plots
         r12 = np.sqrt((positions[:i+1, 0] - positions[:i+1, 2])**2 + 
                       (positions[:i+1, 1] - positions[:i+1, 3])**2)
@@ -263,17 +270,31 @@ def create_orbit_plot(positions, scenario, time_points):
         height=800,
         title_text=f"Three-Body System: {', '.join(scenario['bodies'])}",
         showlegend=True,
+       
+        
+        
         updatemenus=[{
             'type': 'buttons',
             'showactive': False,
+             hovermode='closest',
+             plot_bgcolor='rgb(230, 230, 230)',
+             showlegend=True,
+             legend=dict(
+                yanchor="top",
+                y=0.99,
+                xanchor="left",
+                x=0.01
+            'x': 0.1,
+            'y': 1.1,
             'buttons': [
                 {
                     'label': 'Play',
                     'method': 'animate',
                     'args': [None, {
-                        'frame': {'duration': 50, 'redraw': True},
+                        'frame': {'duration': 30, 'redraw': True},
                         'fromcurrent': True,
-                        'transition': {'duration': 0}
+                        'mode': 'immediate',
+                        'transition': {'duration': 5}
                     }]
                 },
                 {
@@ -286,7 +307,7 @@ def create_orbit_plot(positions, scenario, time_points):
                     }]
                 }
             ]
-        }],
+        }]
         sliders=[{
             'currentvalue': {'prefix': 'Time: ', 'suffix': ' s'},
             'steps': [
