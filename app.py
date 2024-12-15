@@ -107,117 +107,243 @@ def load_model_safely(uploaded_file, scenario_params):
         return model, None
     except Exception as e:
         return None, str(e)
-
-
+        
 def create_orbit_plot(positions, scenario, time_points):
+    """Create interactive orbital plot with rotating bodies"""
     
+    # Ensure we have enough points for gradient calculation
+    if len(time_points) < 2:
+        st.error("Need at least 2 points for velocity calculation")
+        return None
+        
     fig = make_subplots(rows=2, cols=2,
                        specs=[[{"colspan": 2}, None],
                              [{"type": "scatter"}, {"type": "scatter"}]],
-                       subplot_titles=('Orbital Motion',
-                                     'Distance from Center', 
-                                     'Angular Position'))
+                       subplot_titles=('Orbital Trajectories',
+                                     'Distances Between Bodies', 
+                                     'Orbital Velocities'))
     
-    # Extract positions for each body
-    body1_x = positions[:, 0]
-    body1_y = positions[:, 1]
-    body2_x = positions[:, 2]
-    body2_y = positions[:, 3]
-    body3_x = positions[:, 4]
-    body3_y = positions[:, 5]
+    # Define colors and sizes for bodies
+    body_colors = ['blue', 'gray', 'red']
+    body_sizes = [20, 15, 15]  # Relative sizes of bodies
     
-    # Add body trajectories
-    fig.add_trace(
-        go.Scatter(x=body1_x, y=body1_y,
-                  mode='lines+markers',
-                  name=scenario['bodies'][0],
-                  line=dict(color='blue'),
-                  marker=dict(size=10)),
-        row=1, col=1
-    )
+    # Pre-calculate all velocities once
+    dt = time_points[1] - time_points[0]
+    full_velocities = np.zeros_like(positions)
+    for i in range(positions.shape[1]):
+        full_velocities[:, i] = np.gradient(positions[:, i], dt)
     
-    fig.add_trace(
-        go.Scatter(x=body2_x, y=body2_y,
-                  mode='lines+markers',
-                  name=scenario['bodies'][1],
-                  line=dict(color='red'),
-                  marker=dict(size=8)),
-        row=1, col=1
-    )
+    full_vel_mag = np.sqrt(full_velocities[:, ::2]**2 + full_velocities[:, 1::2]**2)
+
+    initial_data = []
+    for j in range(3):
+            # Initial trajectory trace
+            initial_data.append(
+                go.Scatter(
+                    x=[positions[0, j*2]],
+                    y=[positions[0, j*2+1]],
+                    mode='lines+markers',
+                    line=dict(color=body_colors[j], width=2),
+                    marker=dict(size=body_sizes[j], color=body_colors[j]),
+                    name=scenario['bodies'][j]
+                )
+            )
+        
+        fig.add_traces(initial_data)
     
-    fig.add_trace(
-        go.Scatter(x=body3_x, y=body3_y,
-                  mode='lines+markers',
-                  name=scenario['bodies'][2],
-                  line=dict(color='green'),
-                  marker=dict(size=8)),
-        row=1, col=1
-    )
+    # Create animation frames
+        
+    frames = []
+    for i in range(len(time_points)):
+        frame_data = []
+        
+        # Add trajectory traces for each body
+        for j in range(3):
+            # Full trajectory up to current time
+            frame_data.append(
+                go.Scatter(
+                    x=positions[:i+1, j*2],
+                    y=positions[:i+1, j*2+1],
+                    mode='lines+markers',
+                    line=dict(color=body_colors[j], width=2),
+                    marker=dict(
+                        size=body_sizes[j],
+                        color=body_colors[j],
+                        symbol='circle'
+                    ),
+                    name=scenario['bodies'][j],
+                    showlegend=False
+                )
+            )
+        
+        frames.append(go.Frame(
+            data=frame_data,
+            traces=[0, 1, 2],  # Match with initial traces
+            name=f'frame{i}'
+        ))
+        # Add distance plots
+        r12 = np.sqrt((positions[:i+1, 0] - positions[:i+1, 2])**2 + 
+                      (positions[:i+1, 1] - positions[:i+1, 3])**2)
+        r13 = np.sqrt((positions[:i+1, 0] - positions[:i+1, 4])**2 + 
+                      (positions[:i+1, 1] - positions[:i+1, 5])**2)
+        r23 = np.sqrt((positions[:i+1, 2] - positions[:i+1, 4])**2 + 
+                      (positions[:i+1, 3] - positions[:i+1, 5])**2)
+        
+        frame_data.append(
+            go.Scatter(
+                x=time_points[:i+1], 
+                y=r12, 
+                name=f'Distance {scenario["bodies"][0]}-{scenario["bodies"][1]}',
+                line=dict(color='purple'),
+                xaxis='x2',
+                yaxis='y2'
+            )
+        )
+        frame_data.append(
+            go.Scatter(
+                x=time_points[:i+1], 
+                y=r13, 
+                name=f'Distance {scenario["bodies"][0]}-{scenario["bodies"][2]}',
+                line=dict(color='orange'),
+                xaxis='x2',
+                yaxis='y2'
+            )
+        )
+        frame_data.append(
+            go.Scatter(
+                x=time_points[:i+1], 
+                y=r23, 
+                name=f'Distance {scenario["bodies"][1]}-{scenario["bodies"][2]}',
+                line=dict(color='green'),
+                xaxis='x2',
+                yaxis='y2'
+            )
+        )
+        
+        # Add velocity plots using pre-calculated velocities
+        for j in range(3):
+            frame_data.append(
+                go.Scatter(
+                    x=time_points[:i+1], 
+                    y=full_vel_mag[:i+1, j],
+                    name=f'{scenario["bodies"][j]} Velocity',
+                    line=dict(color=body_colors[j]),
+                    xaxis='x3',
+                    yaxis='y3'
+                )
+            )
+        
+        frames.append(go.Frame(data=frame_data, name=f'frame{i}'))
     
-    # Distance from center for each body
-    r1 = np.sqrt(body1_x**2 + body1_y**2)
-    r2 = np.sqrt(body2_x**2 + body2_y**2)
-    r3 = np.sqrt(body3_x**2 + body3_y**2)
+    # Initial empty plot
+    for j in range(3):
+        # Trajectory trace
+        fig.add_trace(
+            go.Scatter(x=[], y=[], mode='lines',
+                      line=dict(color=body_colors[j], width=1),
+                      opacity=0.5,
+                      showlegend=False),
+            row=1, col=1
+        )
+        # Body position
+        fig.add_trace(
+            go.Scatter(x=[], y=[], mode='markers',
+                      marker=dict(size=body_sizes[j], color=body_colors[j],
+                                symbol='circle', line=dict(color='white', width=1)),
+                      name=scenario['bodies'][j]),
+            row=1, col=1
+        )
     
-    # Plot distances
-    fig.add_trace(
-        go.Scatter(x=time_points, y=r1, 
-                  name=f"{scenario['bodies'][0]} Distance",
-                  line=dict(color='blue')),
-        row=2, col=1
-    )
-    fig.add_trace(
-        go.Scatter(x=time_points, y=r2, 
-                  name=f"{scenario['bodies'][1]} Distance",
-                  line=dict(color='red')),
-        row=2, col=1
-    )
-    fig.add_trace(
-        go.Scatter(x=time_points, y=r3, 
-                  name=f"{scenario['bodies'][2]} Distance",
-                  line=dict(color='green')),
-        row=2, col=1
-    )
+    # Add distance traces
+    for name, color in zip(['1-2', '1-3', '2-3'], ['purple', 'orange', 'green']):
+        fig.add_trace(
+            go.Scatter(x=[], y=[], name=f'Distance {name}',
+                      line=dict(color=color)),
+            row=2, col=1
+        )
     
-    # Angular position for each body
-    theta1 = np.arctan2(body1_y, body1_x)
-    theta2 = np.arctan2(body2_y, body2_x)
-    theta3 = np.arctan2(body3_y, body3_x)
+    # Add velocity traces
+    for j, body in enumerate(scenario['bodies']):
+        fig.add_trace(
+            go.Scatter(x=[], y=[], name=f'{body} Velocity',
+                      line=dict(color=body_colors[j])),
+            row=2, col=2
+        )
     
-    # Plot angular positions
-    fig.add_trace(
-        go.Scatter(x=time_points, y=theta1, 
-                  name=f"{scenario['bodies'][0]} Angle",
-                  line=dict(color='blue')),
-        row=2, col=2
-    )
-    fig.add_trace(
-        go.Scatter(x=time_points, y=theta2, 
-                  name=f"{scenario['bodies'][1]} Angle",
-                  line=dict(color='red')),
-        row=2, col=2
-    )
-    fig.add_trace(
-        go.Scatter(x=time_points, y=theta3, 
-                  name=f"{scenario['bodies'][2]} Angle",
-                  line=dict(color='green')),
-        row=2, col=2
-    )
-    
-    # Update layout
+       # Update layout with correct syntax
     fig.update_layout(
         height=800,
-        showlegend=True,
         title_text=f"Three-Body System: {', '.join(scenario['bodies'])}",
-        hovermode='closest'
+        showlegend=True,
+        hovermode='closest',
+        plot_bgcolor='rgb(230, 230, 230)',
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=0.01
+        ),
+        updatemenus=[{
+            'type': 'buttons',
+            'showactive': False,
+            'x': 0.1,
+            'y': 1.1,
+            'buttons': [
+                {
+                    'label': '▶️ Play',
+                    'method': 'animate',
+                    'args': [None, {
+                        'frame': {'duration': 30, 'redraw': True},
+                        'fromcurrent': True,
+                        'mode': 'immediate',
+                        'transition': {'duration': 5}
+                    }]
+                },
+                {
+                    'label': '⏸️ Pause',
+                    'method': 'animate',
+                    'args': [[None], {
+                        'frame': {'duration': 0, 'redraw': False},
+                        'mode': 'immediate',
+                        'transition': {'duration': 0}
+                    }]
+                }
+            ]
+        }],
+        sliders=[{
+            'currentvalue': {'prefix': 'Time: ', 'suffix': ' s'},
+            'steps': [
+                {
+                    'args': [[f'frame{k}'], {
+                        'frame': {'duration': 0, 'redraw': True},
+                        'mode': 'immediate',
+                        'transition': {'duration': 0}
+                    }],
+                    'label': f'{time_points[k]:.1f}',
+                    'method': 'animate'
+                }
+                for k in range(0, len(time_points), max(1, len(time_points)//10))
+            ]
+        }]
     )
     
+    # Make grid visible
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='white', row=1, col=1)
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='white', row=1, col=1)
+    
+    # Update axes
     fig.update_xaxes(title_text="X Position (km)", row=1, col=1)
     fig.update_yaxes(title_text="Y Position (km)", row=1, col=1)
     fig.update_xaxes(title_text="Time (s)", row=2, col=1)
     fig.update_yaxes(title_text="Distance (km)", row=2, col=1)
     fig.update_xaxes(title_text="Time (s)", row=2, col=2)
-    fig.update_yaxes(title_text="Angle (rad)", row=2, col=2)
+    fig.update_yaxes(title_text="Velocity (km/s)", row=2, col=2)
+    
+    if scenario['display_scale'] == 'log':
+        fig.update_yaxes(type="log", row=2, col=1)
+    
+    # Add frames
+    fig.frames = frames
     
     return fig
 
