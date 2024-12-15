@@ -191,8 +191,9 @@ def create_orbit_plot(body1_x, body1_y, body2_x, body2_y, params, t):
     )
     
     # Set aspect ratio to 1:1 to show perfect circles
-    fig.update_xaxes(title_text="X Position (km)", row=1, col=1, scaleanchor="y", scaleratio=1)
-    fig.update_yaxes(title_text="Y Position (km)", row=1, col=1, scaleanchor="x", scaleratio=1)
+    fig.update_xaxes(scaleanchor="y", scaleratio=1)
+    fig.update_yaxes(scaleanchor="x", scaleratio=1)
+
     
     fig.update_xaxes(title_text="Time (s)", row=2, col=1)
     fig.update_yaxes(title_text="Distance (km)", row=2, col=1)
