@@ -402,7 +402,7 @@ def main():
                         fig = create_comparison_plot(positions_pinn, positions_trad, scenario, t_points)
                     else:
                         # Single orbit plot
-                        fig = create_orbit_plot(positions_pinn, scenario, t_points)
+                        fig = create_orbit_plot(body1_x, body1_y, body2_x, body2_y, params, t)
                     
                     st.plotly_chart(fig, use_container_width=True)
                     
