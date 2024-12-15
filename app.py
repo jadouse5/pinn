@@ -107,37 +107,22 @@ def load_model_safely(uploaded_file, scenario_params):
         return model, None
     except Exception as e:
         return None, str(e)
-
-def create_orbit_plot(positions, scenario, time_points):
-    """
-    Create a 3-body orbital plot with similar style to the two-body code.
-    The plot includes:
-    - Orbital motion (top row)
-    - Distance from center (bottom left)
-    - Angular position (bottom right)
-    """
-    fig = make_subplots(
-        rows=2, cols=2,
-        specs=[[{"colspan": 2}, None],
-               [{"type": "scatter"}, {"type": "scatter"}]],
-        subplot_titles=('Orbital Motion',
-                        'Distance from Origin',
-                        'Angular Position')
-    )
+        
+def create_orbit_plot(body1_x, body1_y, body2_x, body2_y, params, t):
+    """Create interactive orbital plot"""
     
-    # Extract positions for each body
-    body1_x = positions[:, 0]
-    body1_y = positions[:, 1]
-    body2_x = positions[:, 2]
-    body2_y = positions[:, 3]
-    body3_x = positions[:, 4]
-    body3_y = positions[:, 5]
+    fig = make_subplots(rows=2, cols=2,
+                       specs=[[{"colspan": 2}, None],
+                              [{"type": "scatter"}, {"type": "scatter"}]],
+                       subplot_titles=('Orbital Motion',
+                                       'Distance from Center', 
+                                       'Angular Position'))
     
     # Add body trajectories
     fig.add_trace(
         go.Scatter(x=body1_x, y=body1_y,
                    mode='lines+markers',
-                   name=scenario['bodies'][0],
+                   name=params['body1_name'],
                    line=dict(color='blue'),
                    marker=dict(size=10)),
         row=1, col=1
@@ -146,94 +131,76 @@ def create_orbit_plot(positions, scenario, time_points):
     fig.add_trace(
         go.Scatter(x=body2_x, y=body2_y,
                    mode='lines+markers',
-                   name=scenario['bodies'][1],
+                   name=params['body2_name'],
                    line=dict(color='red'),
                    marker=dict(size=8)),
         row=1, col=1
     )
     
-    fig.add_trace(
-        go.Scatter(x=body3_x, y=body3_y,
-                   mode='lines+markers',
-                   name=scenario['bodies'][2],
-                   line=dict(color='green'),
-                   marker=dict(size=8)),
-        row=1, col=1
-    )
-    
-    # Plot the center (0,0) for reference
+    # Add center of mass
     fig.add_trace(
         go.Scatter(x=[0], y=[0],
                    mode='markers',
-                   name='Reference Point (0,0)',
+                   name='Center of Mass',
                    marker=dict(size=5, color='black')),
         row=1, col=1
     )
     
-    # Distance from origin
+    # Distance from center
     r1 = np.sqrt(body1_x**2 + body1_y**2)
     r2 = np.sqrt(body2_x**2 + body2_y**2)
-    r3 = np.sqrt(body3_x**2 + body3_y**2)
     
     fig.add_trace(
-        go.Scatter(x=time_points, y=r1, 
-                   name=f"{scenario['bodies'][0]} Distance",
+        go.Scatter(x=t, y=r1, 
+                   name=f"{params['body1_name']} Distance",
                    line=dict(color='blue')),
         row=2, col=1
     )
+    
     fig.add_trace(
-        go.Scatter(x=time_points, y=r2, 
-                   name=f"{scenario['bodies'][1]} Distance",
+        go.Scatter(x=t, y=r2, 
+                   name=f"{params['body2_name']} Distance",
                    line=dict(color='red')),
         row=2, col=1
     )
-    fig.add_trace(
-        go.Scatter(x=time_points, y=r3, 
-                   name=f"{scenario['bodies'][2]} Distance",
-                   line=dict(color='green')),
-        row=2, col=1
-    )
     
-    # Angular positions
+    # Angular position
     theta1 = np.arctan2(body1_y, body1_x)
     theta2 = np.arctan2(body2_y, body2_x)
-    theta3 = np.arctan2(body3_y, body3_x)
     
     fig.add_trace(
-        go.Scatter(x=time_points, y=theta1, 
-                   name=f"{scenario['bodies'][0]} Angle",
+        go.Scatter(x=t, y=theta1, 
+                   name=f"{params['body1_name']} Angle",
                    line=dict(color='blue')),
         row=2, col=2
     )
+    
     fig.add_trace(
-        go.Scatter(x=time_points, y=theta2, 
-                   name=f"{scenario['bodies'][1]} Angle",
+        go.Scatter(x=t, y=theta2, 
+                   name=f"{params['body2_name']} Angle",
                    line=dict(color='red')),
         row=2, col=2
     )
-    fig.add_trace(
-        go.Scatter(x=time_points, y=theta3, 
-                   name=f"{scenario['bodies'][2]} Angle",
-                   line=dict(color='green')),
-        row=2, col=2
-    )
     
-    # Update layout
+    # Update layout and axis scales
     fig.update_layout(
         height=800,
         showlegend=True,
-        title_text=f"Three-Body System: {', '.join(scenario['bodies'])}",
+        title_text=f"Two-Body System: {params['body1_name']}-{params['body2_name']}",
         hovermode='closest'
     )
     
-    fig.update_xaxes(title_text="X Position (km)", row=1, col=1)
-    fig.update_yaxes(title_text="Y Position (km)", row=1, col=1)
+    # Set aspect ratio to 1:1 to show perfect circles
+    fig.update_xaxes(title_text="X Position (km)", row=1, col=1, scaleanchor="y", scaleratio=1)
+    fig.update_yaxes(title_text="Y Position (km)", row=1, col=1, scaleanchor="x", scaleratio=1)
+    
     fig.update_xaxes(title_text="Time (s)", row=2, col=1)
     fig.update_yaxes(title_text="Distance (km)", row=2, col=1)
     fig.update_xaxes(title_text="Time (s)", row=2, col=2)
     fig.update_yaxes(title_text="Angle (rad)", row=2, col=2)
     
     return fig
+
 
 def create_comparison_plot(positions_pinn, positions_trad, scenario, time_points):
     fig = make_subplots(
